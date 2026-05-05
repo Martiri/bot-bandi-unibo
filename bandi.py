@@ -38,10 +38,14 @@ def invia_notifica_telegram(messaggio):
 
 def carica_memoria():
     if os.path.exists(FILE_MEMORIA):
-        with open(FILE_MEMORIA, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(FILE_MEMORIA, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            # Se il file esiste ma è completamente vuoto o corrotto, 
+            # Python ignora l'errore e parte con una memoria vuota.
+            return []
     return []
-
 
 def salva_memoria(memoria):
     with open(FILE_MEMORIA, "w", encoding="utf-8") as f:
