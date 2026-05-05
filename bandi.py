@@ -7,12 +7,13 @@ import io
 import PyPDF2
 from urllib.parse import urljoin
 
-# --- CONFIGURAZIONE TELEGRAM ---
-TELEGRAM_TOKEN = "8724757856:AAF4KN36Z8mcfu45qRCOCHlfemTsNjDxjCY"
-TELEGRAM_CHAT_ID = "234474143"
+# --- CONFIGURAZIONE TELEGRAM TRAMITE GITHUB SECRETS ---
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # --- CONFIGURAZIONE RICERCA ---
 FILE_MEMORIA = "bandi_trovati.json"
+
 
 # Il tuo link con i filtri: Fisica, Laurea (Triennale), iscritti dal secondo anno
 URL_UNIBO_PREMI = "https://bandi.unibo.it/agevolazioni/opportunita?riservato=iscritti&tipocorso=laurea&corsi=6639%2C9244%2C8007&struttura=&search="
