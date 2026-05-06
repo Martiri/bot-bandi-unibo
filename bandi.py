@@ -169,10 +169,6 @@ def controlla_bandi_unibo(memoria):
 def main():
     print("Avvio script di monitoraggio bandi...")
     
-    # --- INIZIO TEST NOTIFICA ---
-    crea_issue_github("BANDO DI PROVA - TEST SISTEMA", "Se ti è arrivata la notifica sul telefono, il collegamento funziona alla perfezione!")
-    # --- FINE TEST NOTIFICA ---
-    
     memoria_bandi = carica_memoria()
     nuovi = controlla_bandi_unibo(memoria_bandi)
     
