@@ -2,9 +2,13 @@ name: Controllo Bandi UniBo
 
 on:
   schedule:
-    # Esegue lo script ogni giorno alle 08:00 UTC (che sono le 10:00 in Italia con l'ora legale)
     - cron: '0 8 * * *'
-  workflow_dispatch: # Questo ti permette di farlo partire manualmente premendo un bottone su GitHub!
+  workflow_dispatch:
+
+# Questo blocco DÀ IL PERMESSO al bot di modificare i file e creare Issues
+permissions:
+  contents: write
+  issues: write
 
 jobs:
   avvia_bot:
@@ -26,8 +30,8 @@ jobs:
 
     - name: Esegui lo script Python
       env:
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # Passiamo al codice Python il Token di sistema automatico di GitHub
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: python bandi.py
 
     - name: Salva i nuovi bandi nel repository
@@ -35,6 +39,5 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action Bot"
         git add bandi_trovati.json
-        # Salva le modifiche solo se ci sono nuovi bandi, altrimenti ignora
         git commit -m "Aggiornamento memoria bandi trovati" || echo "Nessun nuovo bando da salvare"
         git push
