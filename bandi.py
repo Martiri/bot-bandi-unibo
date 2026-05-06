@@ -7,34 +7,40 @@ import io
 import PyPDF2
 from urllib.parse import urljoin
 
-# --- CONFIGURAZIONE TELEGRAM TRAMITE GITHUB SECRETS ---
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-
 # --- CONFIGURAZIONE RICERCA ---
 FILE_MEMORIA = "bandi_trovati.json"
-
-
-# Il tuo link con i filtri: Fisica, Laurea (Triennale), iscritti dal secondo anno
-URL_UNIBO_PREMI = "https://bandi.unibo.it/agevolazioni/opportunita?riservato=iscritti&tipocorso=laurea&corsi=6639%2C9244%2C8007&struttura=&search="
+URL_UNIBO_PREMI = "https://bandi.unibo.it/agevolazioni/opportunita?riservato=iscritti&tipocorso=laurea&corsi=6639%2C9244%2C8007&struttura=&search=&stato=aperto"
 
 KEYWORDS_MERITO = ["merito", "eccellenza", "premio", "curriculum", "media ponderata", "cfu"]
 KEYWORDS_ESCLUDI = ["esclusivamente isee", "solo isee"]
 
+def crea_issue_github(titolo_bando, corpo_messaggio):
+    """Crea una Issue nel repository di GitHub per inviarti la notifica."""
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
 
-def invia_notifica_telegram(messaggio):
-    """Invia un messaggio tramite Telegram."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": messaggio,
-        "parse_mode": "HTML"
+    if not token or not repo:
+        print("⚠️ Token GitHub o nome Repository mancanti. Notifica non inviata.")
+        return
+
+    url = f"https://api.github.com/repos/{repo}/issues"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
     }
-    try:
-        requests.post(url, data=payload)
-    except Exception as e:
-        print(f"Errore Telegram: {e}")
+    
+    # Payload per creare l'Issue
+    payload = {
+        "title": f"🎓 Nuovo Bando: {titolo_bando}",
+        "body": corpo_messaggio
+    }
 
+    try:
+        risposta = requests.post(url, headers=headers, json=payload)
+        risposta.raise_for_status()
+        print(f"✅ Notifica GitHub creata con successo per: {titolo_bando}")
+    except Exception as e:
+        print(f"❌ Errore nella creazione della notifica su GitHub: {e}")
 
 def carica_memoria():
     if os.path.exists(FILE_MEMORIA):
@@ -42,8 +48,6 @@ def carica_memoria():
             with open(FILE_MEMORIA, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError:
-            # Se il file esiste ma è completamente vuoto o corrotto, 
-            # Python ignora l'errore e parte con una memoria vuota.
             return []
     return []
 
@@ -51,9 +55,7 @@ def salva_memoria(memoria):
     with open(FILE_MEMORIA, "w", encoding="utf-8") as f:
         json.dump(memoria, f)
 
-
 def estrai_testo_pdf(url_pdf):
-    """Scarica il PDF in memoria ed estrae tutto il testo."""
     print(f"📄 Lettura PDF in corso: {url_pdf}")
     try:
         response = requests.get(url_pdf, stream=True, timeout=15)
@@ -73,9 +75,7 @@ def estrai_testo_pdf(url_pdf):
         print(f"Errore durante l'estrazione del PDF: {e}")
         return ""
 
-
 def trova_pdf_nel_bando(url_dettaglio_bando):
-    """Visita la pagina specifica del bando e cerca link ai file .pdf"""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url_dettaglio_bando, headers=headers, timeout=10)
@@ -87,24 +87,17 @@ def trova_pdf_nel_bando(url_dettaglio_bando):
                 return urljoin("https://bandi.unibo.it", href)
         return None
     except Exception as e:
-        print(f"Errore nella ricerca PDF: {e}")
         return None
 
-
 def valuta_testo_bando(testo_da_valutare):
-    """Valuta il testo combinato e restituisce (Esito, Motivo)."""
-    
-    # Controllo scarto (ISEE)
     for kw in KEYWORDS_ESCLUDI:
         if kw in testo_da_valutare:
             return False, f"Scartato (Trovato limite: '{kw}')"
             
-    # Controllo approvazione (Merito)
     for kw in KEYWORDS_MERITO:
         if kw in testo_da_valutare:
             return True, f"Trovato riferimento a: '{kw}'"
             
-    # Default (Nessun limite ISEE esplicito)
     return True, "Nessun limite ISEE restrittivo rilevato"
 
 def controlla_bandi_unibo(memoria):
@@ -142,34 +135,27 @@ def controlla_bandi_unibo(memoria):
                     testo_pdf = estrai_testo_pdf(url_pdf)
                     testo_totale += " " + testo_pdf
                 
-                # Ora riceviamo sia l'esito (True/False) sia il motivo
                 bando_valido, motivo = valuta_testo_bando(testo_totale)
                 
                 if bando_valido:
                     nota_pdf = "📄 (PDF Analizzato)" if url_pdf else "🌐 (Solo Testo Web)"
                     
-                    # Creiamo un'anteprima pulita del testo circostante (massimo 200 caratteri)
                     testo_pulito = " ".join(testo_circostante.split())
-                    if len(testo_pulito) > 200:
-                        breve_descrizione = testo_pulito[:200] + "..."
-                    else:
-                        breve_descrizione = testo_pulito
-                        
-                    # Se il sito non fornisce testo circostante, mettiamo un avviso
+                    breve_descrizione = testo_pulito[:250] + "..." if len(testo_pulito) > 250 else testo_pulito
+                    
                     if not breve_descrizione or breve_descrizione == titolo.lower():
-                        breve_descrizione = "Nessuna descrizione breve disponibile sulla pagina web. Clicca il link per i dettagli."
+                        breve_descrizione = "Nessuna descrizione breve disponibile."
 
-                    # Nuovo formato del messaggio Telegram
-                    messaggio = (
-                        f"🎓 <b>Nuovo Bando Trovato!</b> {nota_pdf}\n\n"
-                        f"<b>Titolo:</b> {titolo}\n\n"
-                        f"✅ <b>Perché te lo segnalo:</b> {motivo}\n"
-                        f"ℹ️ <b>Info:</b> <i>{breve_descrizione.capitalize()}</i>\n\n"
-                        f"<a href='{link_completo}'>Vai alla pagina del bando</a>"
+                    # Costruiamo il testo in Markdown per l'Issue di GitHub
+                    corpo_issue = (
+                        f"### {nota_pdf}\n\n"
+                        f"✅ **Perché te lo segnalo:** {motivo}\n\n"
+                        f"ℹ️ **Informazioni:** \n> {breve_descrizione.capitalize()}\n\n"
+                        f"🔗 **[Clicca qui per aprire la pagina del bando]({link_completo})**"
                     )
                     
-                    invia_notifica_telegram(messaggio)
-                    print(f"\n🎯 NUOVO BANDO: {titolo}\n💡 MOTIVO: {motivo}\n🔗 LINK: {link_completo}\n")
+                    # Chiamata a GitHub invece che a Telegram
+                    crea_issue_github(titolo, corpo_issue)
                     
                     memoria.append(link_completo)
                     nuovi_bandi_trovati += 1
@@ -183,8 +169,6 @@ def controlla_bandi_unibo(memoria):
 def main():
     print("Avvio script di monitoraggio bandi...")
     memoria_bandi = carica_memoria()
-    
-    # Se usi PythonAnywhere/Replit, questo codice girerà una volta sola ad ogni avvio programmato
     nuovi = controlla_bandi_unibo(memoria_bandi)
     
     if nuovi > 0:
@@ -192,7 +176,6 @@ def main():
         print(f"Operazione conclusa. Trovati {nuovi} nuovi bandi validi.")
     else:
         print("Operazione conclusa. Nessun bando interessante al momento.")
-
 
 if __name__ == "__main__":
     main()
