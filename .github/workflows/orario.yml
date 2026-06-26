@@ -2,42 +2,41 @@ name: Controllo Bandi UniBo
 
 on:
   schedule:
+    # Ogni giorno alle 08:00 UTC = 10:00 ora italiana (ora legale)
     - cron: '0 8 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Permette di avviarlo manualmente dalla scheda Actions
 
-# Questo blocco DÀ IL PERMESSO al bot di modificare i file e creare Issues
 permissions:
-  contents: write
-  issues: write
+  contents: write  # Per salvare bandi_trovati.json
+  issues: write    # Per creare le notifiche via Issue
 
 jobs:
   avvia_bot:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout del codice
-      uses: actions/checkout@v4
+      - name: Checkout del codice
+        uses: actions/checkout@v4
 
-    - name: Setup di Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Installa le librerie necessarie
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 PyPDF2
+      - name: Installa le dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 PyPDF2
 
-    - name: Esegui lo script Python
-      env:
-        # Passiamo al codice Python il Token di sistema automatico di GitHub
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: python bandi.py
+      - name: Esegui lo script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python bandi.py
 
-    - name: Salva i nuovi bandi nel repository
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action Bot"
-        git add bandi_trovati.json
-        git commit -m "Aggiornamento memoria bandi trovati" || echo "Nessun nuovo bando da salvare"
-        git push
+      - name: Salva la memoria aggiornata nel repository
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Bot"
+          git add bandi_trovati.json
+          git diff --cached --quiet || git commit -m "chore: aggiorna memoria bandi"
+          git push
