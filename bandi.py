@@ -4,6 +4,7 @@ import json
 import os
 import io
 import PyPDF2
+from datetime import date
 from urllib.parse import urljoin
 
 FILE_MEMORIA = "bandi_trovati.json"
@@ -18,10 +19,11 @@ KEYWORDS_MERITO = [
     "merito", "eccellenza", "premio",
     "curriculum", "media ponderata", "cfu",
 ]
-KEYWORDS_ESCLUDI = ["esclusivamente isee", "solo isee"]
+
+LUNGHEZZA_MAX_RIASSUNTO = 500
 
 
-def crea_issue_github(titolo_bando, corpo_messaggio):
+def crea_issue_github(titolo_issue, corpo_messaggio):
     token = os.environ.get("GITHUB_TOKEN")
     repo  = os.environ.get("GITHUB_REPOSITORY")
     if not token or not repo:
@@ -33,14 +35,14 @@ def crea_issue_github(titolo_bando, corpo_messaggio):
         "Accept": "application/vnd.github.v3+json",
     }
     payload = {
-        "title": f"🎓 Nuovo Bando: {titolo_bando}",
+        "title": titolo_issue,
         "body": corpo_messaggio,
         "labels": ["bando"],
     }
     try:
         risposta = requests.post(url, headers=headers, json=payload, timeout=10)
         risposta.raise_for_status()
-        print(f"  ✅ Issue GitHub creata: {titolo_bando}")
+        print(f"  ✅ Issue GitHub creata: {titolo_issue}")
     except requests.exceptions.RequestException as e:
         print(f"  ❌ Errore creazione Issue GitHub: {e}")
 
@@ -73,7 +75,7 @@ def estrai_testo_pdf(url_pdf):
             estratto = pagina.extract_text()
             if estratto:
                 testo += estratto + " "
-        return testo.lower()
+        return testo
     except Exception as e:
         print(f"    ⚠️  Impossibile leggere il PDF: {e}")
         return ""
@@ -95,18 +97,31 @@ def trova_pdf_nel_bando(url_bando):
 
 
 def valuta_testo_bando(testo):
-    for kw in KEYWORDS_ESCLUDI:
-        if kw in testo:
-            return False, f"scartato — trovato: '{kw}'"
+    testo_lower = testo.lower()
     for kw in KEYWORDS_MERITO:
-        if kw in testo:
+        if kw in testo_lower:
             return True, f"trovato riferimento a: '{kw}'"
-    return True, "nessun limite ISEE restrittivo rilevato"
+    return True, "nessun riferimento specifico rilevato — verificare a mano"
+
+
+def crea_riassunto(testo_pdf, testo_contesto, titolo):
+    """Genera un riassunto/estratto preferendo il testo del PDF a quello
+    della pagina web, dato che il PDF è la fonte più affidabile e completa."""
+    fonte = testo_pdf.strip() if testo_pdf and testo_pdf.strip() else testo_contesto
+    riassunto = " ".join(fonte.split())
+    if len(riassunto) > LUNGHEZZA_MAX_RIASSUNTO:
+        riassunto = riassunto[:LUNGHEZZA_MAX_RIASSUNTO] + "…"
+    if not riassunto or riassunto.lower() == titolo.lower():
+        riassunto = "Nessuna descrizione disponibile."
+    return riassunto.capitalize()
 
 
 def controlla_bandi_unibo(memoria):
+    """Analizza il portale, aggiorna 'memoria' in place con ogni link
+    esaminato (anche quelli scartati, per non ricontrollarli ogni volta)
+    e restituisce la lista dei bandi nuovi e validi trovati in questo giro."""
     print("🔍 Controllo bandi.unibo.it …")
-    nuovi = 0
+    trovati = []
     try:
         risposta = requests.get(
             URL_UNIBO,
@@ -135,47 +150,69 @@ def controlla_bandi_unibo(memoria):
                 continue
 
             padre = tag_a.find_parent(["tr", "li", "div", "article"])
-            testo_contesto = padre.get_text(" ", strip=True).lower() if padre else ""
+            testo_contesto = padre.get_text(" ", strip=True) if padre else ""
 
-            if "scaduto" in testo_contesto:
+            if "scaduto" in testo_contesto.lower():
                 continue
 
             print(f"  → Candidato: {titolo}")
 
-            testo_totale = f"{titolo.lower()} {testo_contesto}"
             url_pdf   = trova_pdf_nel_bando(link_completo)
             testo_pdf = estrai_testo_pdf(url_pdf) if url_pdf else ""
-            testo_totale += " " + testo_pdf
+            testo_totale = f"{titolo} {testo_contesto} {testo_pdf}"
 
-            valido, motivo = valuta_testo_bando(testo_totale)
+            _, motivo = valuta_testo_bando(testo_totale)
             memoria.append(link_completo)
 
-            if not valido:
-                print(f"    ⛔ {motivo}")
-                continue
+            riassunto = crea_riassunto(testo_pdf, testo_contesto, titolo)
+            pdf_letto_ok = bool(url_pdf and testo_pdf.strip())
+            nota_pdf = ("📄 Riassunto generato dal PDF del bando" if pdf_letto_ok
+                        else "🌐 PDF non trovato o non leggibile — riassunto dal testo della pagina")
 
-            anteprima = " ".join(testo_contesto.split())
-            if len(anteprima) > 300:
-                anteprima = anteprima[:300] + "…"
-            if not anteprima or anteprima.lower() == titolo.lower():
-                anteprima = "Nessuna descrizione disponibile sulla pagina web."
-
-            nota_pdf = "📄 PDF analizzato" if url_pdf else "🌐 solo testo web"
-            corpo_issue = (
-                f"### {nota_pdf}\n\n"
-                f"✅ **Perché te lo segnalo:** {motivo}\n\n"
-                f"ℹ️ **Anteprima:**\n> {anteprima.capitalize()}\n\n"
-                f"🔗 **[Apri la pagina del bando]({link_completo})**"
-            )
-
-            crea_issue_github(titolo, corpo_issue)
-            print(f"    ✅ Notificato — {motivo}")
-            nuovi += 1
+            trovati.append({
+                "titolo": titolo,
+                "link": link_completo,
+                "motivo": motivo,
+                "riassunto": riassunto,
+                "nota_pdf": nota_pdf,
+            })
+            print(f"    ✅ Trovato — {motivo}")
 
     except requests.exceptions.RequestException as e:
         print(f"❌ Errore di connessione a UniBo: {e}")
 
-    return nuovi
+    return trovati
+
+
+def costruisci_issue(trovati):
+    """Costruisce titolo e corpo dell'unica issue del giorno:
+    un riepilogo se sono stati trovati bandi, un avviso di 'nessuna novità' altrimenti."""
+    oggi = date.today().strftime("%d/%m/%Y")
+
+    if not trovati:
+        titolo_issue = f"📭 Nessun nuovo bando — {oggi}"
+        corpo = (
+            f"Il controllo automatico di oggi ({oggi}) non ha trovato nuovi bandi "
+            f"rispetto a quelli già segnalati in precedenza.\n\n"
+            f"Il prossimo controllo è previsto per domani."
+        )
+        return titolo_issue, corpo
+
+    titolo_issue = f"🎓 {len(trovati)} nuovo/i bando/i trovato/i — {oggi}"
+    sezioni = []
+    for b in trovati:
+        sezioni.append(
+            f"## {b['titolo']}\n\n"
+            f"{b['nota_pdf']}\n\n"
+            f"✅ **Perché te lo segnalo:** {b['motivo']}\n\n"
+            f"ℹ️ **Riassunto:**\n> {b['riassunto']}\n\n"
+            f"🔗 **[Apri la pagina del bando]({b['link']})**"
+        )
+    corpo = (
+        f"Trovati **{len(trovati)}** nuovi bandi il {oggi}:\n\n"
+        + "\n\n---\n\n".join(sezioni)
+    )
+    return titolo_issue, corpo
 
 
 def main():
@@ -183,14 +220,24 @@ def main():
     print("  Avvio script monitoraggio bandi UniBo")
     print("=" * 60)
     memoria = carica_memoria()
-    print(f"  Bandi già in memoria: {len(memoria)}\n")
-    nuovi = controlla_bandi_unibo(memoria)
-    if nuovi > 0:
+    lunghezza_iniziale = len(memoria)
+    print(f"  Bandi già in memoria: {lunghezza_iniziale}\n")
+
+    trovati = controlla_bandi_unibo(memoria)
+
+    titolo_issue, corpo_issue = costruisci_issue(trovati)
+    crea_issue_github(titolo_issue, corpo_issue)
+
+    # Salva la memoria se sono stati esaminati nuovi link (trovati o scartati)
+    if len(memoria) > lunghezza_iniziale:
         salva_memoria(memoria)
-        print(f"\n🏁 Completato. Nuovi bandi notificati: {nuovi}")
+
+    if trovati:
+        print(f"\n🏁 Completato. Nuovi bandi notificati: {len(trovati)}")
     else:
-        print("\n🏁 Completato. Nessun nuovo bando al momento.")
+        print("\n🏁 Completato. Nessun nuovo bando — issue di stato inviata.")
 
 
 if __name__ == "__main__":
     main()
+    
