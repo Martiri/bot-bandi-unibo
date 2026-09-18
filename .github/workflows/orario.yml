@@ -2,8 +2,9 @@ name: Controllo Bandi UniBo
 
 on:
   schedule:
-    # Ogni giorno alle 08:00 UTC = 10:00 ora italiana (ora legale)
-    - cron: '0 8 * * *'
+    # Mattina alle 05:15 UTC (07:15 ora italiana estiva CEST / 06:15 ora solare CET).
+    # Il minuto non congestionato (:15 anziché :00) evita le code di GitHub Actions.
+    - cron: '15 5 * * *'
   workflow_dispatch: # Permette di avviarlo manualmente dalla scheda Actions
 
 permissions:

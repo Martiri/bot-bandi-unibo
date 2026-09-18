@@ -34,11 +34,14 @@ def crea_issue_github(titolo_issue, corpo_messaggio):
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github.v3+json",
     }
+    owner = repo.split("/")[0] if "/" in repo else None
     payload = {
         "title": titolo_issue,
         "body": corpo_messaggio,
         "labels": ["bando"],
     }
+    if owner:
+        payload["assignees"] = [owner]
     try:
         risposta = requests.post(url, headers=headers, json=payload, timeout=10)
         risposta.raise_for_status()
